@@ -723,6 +723,187 @@ def evaluate_linear_model(model, test_data):
 
 
 
+def plot_nlb_and_eurostat_data(data, eurostat_datasets, output_path='/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/data/data_plots.png'):
+    """
+    Plots NLB NPL data and each Eurostat dataset as subplots, arranges them in a grid,
+    and saves the figure to the specified output_path.
+    
+    Parameters:
+        data: pd.DataFrame containing at least the column 'npl' and a date/time index.
+        eurostat_datasets: dict of Eurostat dataset dicts, each with keys 'times' and 'values'.
+        output_path: file path where the PNG image is saved.
+    """
+    num_plots = 1 + len(eurostat_datasets)
+    cols = 5
+    rows = (num_plots + cols - 1) // cols
+
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 6, rows * 4), squeeze=False)
+
+    # First subplot: NLB NPL
+    ax = axes[0, 0]
+    # Ensure the index is parsed as datetime, if not already
+    try:
+        idx = pd.to_datetime(data.index.to_list())
+    except Exception:
+        idx = data.index.to_list()
+    ax.plot(idx, data['npl'])
+    ax.set_title('NLB NPL')
+    ax.set_xlabel('Date')
+    ax.set_ylabel('NPL')
+    ax.xaxis.set_major_locator(mdates.YearLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+
+    # The rest: Eurostat datasets
+    plot_i = 1
+    for key in eurostat_datasets:
+        r = plot_i // cols
+        c = plot_i % cols
+        ax = axes[r, c]
+        dataset = eurostat_datasets[key]
+        times = dataset['times']
+        values = dataset['values']
+
+        freq = get_eurostat_time_unit(times[0])
+
+        if freq == 'a':   # annual
+            x_vals = pd.to_datetime(pd.Series(times).astype(str), format='%Y')
+        elif freq == 'q': # quarterly like '2019-Q4'
+            x_vals = pd.PeriodIndex(times, freq='Q').to_timestamp('Q')
+        elif freq == 'm': # monthly like '2019-12'
+            x_vals = pd.to_datetime(times, format='%Y-%m')
+        else:
+            x_vals = times  # fallback
+
+        ax.plot(x_vals, values)
+        ax.set_title(key)
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Value')
+        if isinstance(x_vals, (pd.Series, pd.DatetimeIndex, list)) and hasattr(x_vals, 'dtype') and str(x_vals.dtype).startswith('datetime'):
+            ax.xaxis.set_major_locator(mdates.YearLocator())
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+        plot_i += 1
+
+    # Hide any unused subplots
+    for n in range(num_plots, rows * cols):
+        r = n // cols
+        c = n % cols
+        fig.delaxes(axes[r, c])
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300)
+    plt.show()
+
+
+
+# Plots the NPL values (actual and predicted) for training and two test splits
+def plot_npl_predictions(data_train, data_test_1, data_test_2, model):
+    """
+    Plot NPL values for training and test data, including model predictions.
+
+    Parameters
+    ----------
+    data_train : pd.DataFrame
+        The training set (expects 'npl' column and datetime index).
+    data_test_1 : pd.DataFrame
+        First test split (expects 'npl' column and datetime index).
+    data_test_2 : pd.DataFrame
+        Second test split (expects 'npl' column and datetime index).
+    model : fitted sklearn model
+        Trained model on data_train; must be compatible with evaluate_linear_model.
+
+    Returns
+    -------
+    None
+        Displays and saves the resulting plots.
+    """
+
+    # Get model predictions and performance for the two test splits
+    y_pred_test_1, mse_test_1, r2_test_1 = evaluate_linear_model(model, data_test_1)
+    y_pred_test_2, mse_test_2, r2_test_2 = evaluate_linear_model(model, data_test_2)
+
+    # Create figure with two stacked subplots (taller for training/test_1, shorter for test_2)
+    fig, axes = plt.subplots(
+        2, 1, figsize=(12, 8), sharex=False, gridspec_kw={'height_ratios': [2, 1]}
+    )
+
+    # --- Top subplot: Training set and first test split ---
+    ax = axes[0]
+    # Plot observed training NPL values
+    ax.plot(
+        data_train.index,
+        data_train['npl'],
+        color='black',
+        label='train data',
+        linewidth=2
+    )
+    # Plot observed first test split (ground truth)
+    ax.scatter(
+        data_test_1.index,
+        data_test_1['npl'],
+        color='green',
+        label='test_1 ground truth',
+        zorder=3
+    )
+    # Plot predicted values for first test split
+    ax.scatter(
+        data_test_1.index,
+        y_pred_test_1,
+        color='violet',
+        label='test_1 predicted',
+        marker='x',
+        s=70,
+        zorder=4
+    )
+    ax.set_title(
+        f"Training and Test 1 Data with Predictions (MSE: {mse_test_1:.4f}, R²: {r2_test_1:.4f})"
+    )
+    ax.set_ylabel("NPL Value")
+    ax.legend()
+    ax.grid(True, linestyle='--', alpha=0.5)
+    ax.xaxis.set_major_locator(mdates.YearLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+
+    # --- Bottom subplot: Second test split only ---
+    ax2 = axes[1]
+    # Plot observed second test split (ground truth)
+    ax2.scatter(
+        data_test_2.index,
+        data_test_2['npl'],
+        color='green',
+        label='test_2 ground truth',
+        zorder=3
+    )
+    # Plot predicted values for second test split
+    ax2.scatter(
+        data_test_2.index,
+        y_pred_test_2,
+        color='violet',
+        label='test_2 predicted',
+        marker='x',
+        s=70,
+        zorder=4
+    )
+    ax2.set_title(
+        f"Test 2 Data with Predictions (MSE: {mse_test_2:.4f}, R²: {r2_test_2:.4f})"
+    )
+    ax2.set_ylabel("NPL Value")
+    ax2.legend()
+    ax2.grid(True, linestyle='--', alpha=0.5)
+    ax2.xaxis.set_major_locator(mdates.YearLocator())
+    ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+    ax2.set_xlabel("Date")
+
+    # Finalize layout and save/show the plot
+    plt.tight_layout()
+    # Save to file, ensure tight bounding box for legend etc.
+    plt.savefig(
+        '/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/data/npl_predictions.png',
+        dpi=300,
+        bbox_inches="tight",   # includes outside artists
+        pad_inches=0.1
+    )
+    plt.show()
+
 def plot_abs_coeff_series_by_dataset(
     model: LinearRegression,
     feature_names: Iterable[str],
@@ -844,114 +1025,6 @@ def plot_abs_coeff_series_by_dataset(
 
 
 
-# Plots the NPL values (actual and predicted) for training and two test splits
-def plot_npl_predictions(data_train, data_test_1, data_test_2, model):
-    """
-    Plot NPL values for training and test data, including model predictions.
-
-    Parameters
-    ----------
-    data_train : pd.DataFrame
-        The training set (expects 'npl' column and datetime index).
-    data_test_1 : pd.DataFrame
-        First test split (expects 'npl' column and datetime index).
-    data_test_2 : pd.DataFrame
-        Second test split (expects 'npl' column and datetime index).
-    model : fitted sklearn model
-        Trained model on data_train; must be compatible with evaluate_linear_model.
-
-    Returns
-    -------
-    None
-        Displays and saves the resulting plots.
-    """
-
-    # Get model predictions and performance for the two test splits
-    y_pred_test_1, mse_test_1, r2_test_1 = evaluate_linear_model(model, data_test_1)
-    y_pred_test_2, mse_test_2, r2_test_2 = evaluate_linear_model(model, data_test_2)
-
-    # Create figure with two stacked subplots (taller for training/test_1, shorter for test_2)
-    fig, axes = plt.subplots(
-        2, 1, figsize=(12, 8), sharex=False, gridspec_kw={'height_ratios': [2, 1]}
-    )
-
-    # --- Top subplot: Training set and first test split ---
-    ax = axes[0]
-    # Plot observed training NPL values
-    ax.plot(
-        data_train.index,
-        data_train['npl'],
-        color='black',
-        label='train data',
-        linewidth=2
-    )
-    # Plot observed first test split (ground truth)
-    ax.scatter(
-        data_test_1.index,
-        data_test_1['npl'],
-        color='green',
-        label='test_1 ground truth',
-        zorder=3
-    )
-    # Plot predicted values for first test split
-    ax.scatter(
-        data_test_1.index,
-        y_pred_test_1,
-        color='violet',
-        label='test_1 predicted',
-        marker='x',
-        s=70,
-        zorder=4
-    )
-    ax.set_title(
-        f"Training and Test 1 Data with Predictions (MSE: {mse_test_1:.4f}, R²: {r2_test_1:.4f})"
-    )
-    ax.set_ylabel("NPL Value")
-    ax.legend()
-    ax.grid(True, linestyle='--', alpha=0.5)
-    ax.xaxis.set_major_locator(mdates.YearLocator())
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
-
-    # --- Bottom subplot: Second test split only ---
-    ax2 = axes[1]
-    # Plot observed second test split (ground truth)
-    ax2.scatter(
-        data_test_2.index,
-        data_test_2['npl'],
-        color='green',
-        label='test_2 ground truth',
-        zorder=3
-    )
-    # Plot predicted values for second test split
-    ax2.scatter(
-        data_test_2.index,
-        y_pred_test_2,
-        color='violet',
-        label='test_2 predicted',
-        marker='x',
-        s=70,
-        zorder=4
-    )
-    ax2.set_title(
-        f"Test 2 Data with Predictions (MSE: {mse_test_2:.4f}, R²: {r2_test_2:.4f})"
-    )
-    ax2.set_ylabel("NPL Value")
-    ax2.legend()
-    ax2.grid(True, linestyle='--', alpha=0.5)
-    ax2.xaxis.set_major_locator(mdates.YearLocator())
-    ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
-    ax2.set_xlabel("Date")
-
-    # Finalize layout and save/show the plot
-    plt.tight_layout()
-    # Save to file, ensure tight bounding box for legend etc.
-    plt.savefig(
-        '/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/data/npl_predictions.png',
-        dpi=300,
-        bbox_inches="tight",   # includes outside artists
-        pad_inches=0.1
-    )
-    plt.show()
 
                 
 
@@ -980,6 +1053,8 @@ for key in eurostat_datasets:
 print('Composing model data')
 # data = compose_modeling_data(eurostat_datasets, scale=True, impute=True, nlb_window = 2, months_window=6, quarters_window=2, annual_window=1)
 data = compose_modeling_data(eurostat_datasets, scale=True, impute=True, nlb_window = nlb_window, months_window=months_window, quarters_window=quarters_window, annual_window=annual_window)
+
+plot_nlb_and_eurostat_data(data, eurostat_datasets, output_path='/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/data/data_plots.png')
 
 # print(data.columns)
 
@@ -1021,85 +1096,9 @@ plot_npl_predictions(data_train, data_test_1, data_test_2, model)
 # print(len(model.coef_))
 
 
-ax = plot_abs_coeff_series_by_dataset(model, feature_names=data.drop(columns=['npl']).columns)
+plot_abs_coeff_series_by_dataset(model, feature_names=data.drop(columns=['npl']).columns)
 
 
 
 
-# Plot the data
-
-num_plots = 1 + len(eurostat_datasets)
-cols = 5
-rows = (num_plots + cols - 1) // cols
-
-fig, axes = plt.subplots(rows, cols, figsize=(cols * 6, rows * 4), squeeze=False)
-
-# First subplot: NLB NPL
-ax = axes[0, 0]
-# Ensure the index is parsed as datetime, if not already
-try:
-    idx = pd.to_datetime(data.index.to_list())
-except Exception:
-    idx = data.index.to_list()
-ax.plot(idx, data['npl'])
-ax.set_title('NLB NPL')
-ax.set_xlabel('Date')
-ax.set_ylabel('NPL')
-ax.xaxis.set_major_locator(mdates.YearLocator())
-ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
-
-# The rest: Eurostat datasets
-plot_i = 1
-for key in eurostat_datasets:
-    r = plot_i // cols
-    c = plot_i % cols
-    ax = axes[r, c]
-    dataset = eurostat_datasets[key]
-    times = dataset['times']
-    values = dataset['values']
-
-    freq = get_eurostat_time_unit(times[0])
-
-    if freq == 'a':   # annual
-        x_vals = pd.to_datetime(pd.Series(times).astype(str), format='%Y')
-    elif freq == 'q': # quarterly like '2019-Q4'
-        x_vals = pd.PeriodIndex(times, freq='Q').to_timestamp('Q')
-    elif freq == 'm': # monthly like '2019-12'
-        x_vals = pd.to_datetime(times, format='%Y-%m')
-    else:
-        x_vals = times  # fallback
-
-    # # Attempt to parse x axis to datetime, if possible
-    # try:
-    #     x_vals = pd.to_datetime(times, errors='coerce')
-    #     if x_vals.isnull().all():
-    #         x_vals = times  # fallback if parsing fails
-    # except Exception:
-    #     x_vals = times
-
-    ax.plot(x_vals, values)
-    ax.set_title(key)
-    ax.set_xlabel('Time')
-    ax.set_ylabel('Value')
-    if isinstance(x_vals, (pd.Series, pd.DatetimeIndex, list)) and hasattr(x_vals, 'dtype') and str(x_vals.dtype).startswith('datetime'):
-        ax.xaxis.set_major_locator(mdates.YearLocator())
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
-    plot_i += 1
-
-# Hide any unused subplots
-for n in range(num_plots, rows * cols):
-    r = n // cols
-    c = n % cols
-    fig.delaxes(axes[r, c])
-
-plt.tight_layout()
-
-plt.savefig(f'/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/data/data_plots.png',dpi=300)
-plt.show()
-
-
-
-
-
-# Train -test -test split
 
