@@ -207,6 +207,7 @@ def retrieve_eurostat_dataset(dataset_dict):
     time_column_name = 'TIME_PERIOD'        # Name of the time column
     value_column_name = 'OBS_VALUE'         # Name of the value column
     country_column_name = 'Geopolitical entity (reporting)'  # Name of the country col
+    
 
     # Load the CSV file into a DataFrame
     df = pd.read_csv(url)
@@ -733,7 +734,6 @@ def evaluate_linear_model(model, test_data):
 
 
 def _year_locator_for_span(dates, max_ticks=8):
-    """Choose a YearLocator interval so ticks are not too dense."""
     if not len(dates):
         return mdates.YearLocator(), mdates.DateFormatter('%Y')
     dmin, dmax = pd.to_datetime(dates[0]), pd.to_datetime(dates[-1])
@@ -746,81 +746,74 @@ def plot_nlb_and_eurostat_data(
     eurostat_datasets,
     output_path=os.path.join(BASE_DIR, 'data', 'data_plots.png')
 ):
-    """
-    Plots NLB NPL data and each Eurostat dataset as subplots, arranged in a grid,
-    and saves the figure to output_path.
-    """
-    # --- layout ---
     num_plots = 1 + len(eurostat_datasets)
     cols = 3
     rows = (num_plots + cols - 1) // cols
     fig, axes = plt.subplots(rows, cols, figsize=(cols * 5.6, rows * 3.8), squeeze=False)
     axes_flat = axes.ravel()
 
-    # --- first subplot: NLB NPL ---
+    # NLB NPL
     ax = axes_flat[0]
     try:
         idx = pd.to_datetime(data.index.to_list())
     except Exception:
         idx = data.index.to_list()
-
-    ax.plot(idx, data['npl'], linewidth=2.8, color='#230078')
+    ax.plot(idx, data['npl'], linewidth=3.5, color='#230078')
     ax.set_title('NLB NPL', pad=8)
-    ax.set_xlabel('Date')
-    ax.set_ylabel('NPL')
-
+    ax.set_xlabel('Date'); ax.set_ylabel('NPL')
     if hasattr(idx, '__len__') and len(idx) > 1:
         loc, fmt = _year_locator_for_span(idx)
-        ax.xaxis.set_major_locator(loc)
-        ax.xaxis.set_major_formatter(fmt)
+        ax.xaxis.set_major_locator(loc); ax.xaxis.set_major_formatter(fmt)
 
-    # --- Eurostat subplots ---
+    # Eurostat
     plot_i = 1
     for key, dataset in eurostat_datasets.items():
         ax = axes_flat[plot_i]
-        times = dataset['times']
-        values = dataset['values']
+
+        times = pd.Series(dataset['times'])
+        values = pd.Series(dataset['values'])
         ylab = dataset.get('dataset_code', 'Value')
 
-        freq = get_eurostat_time_unit(times[0])  # 'a', 'q', 'm', ...
+        # Extract year from first 4 chars (works for 'YYYY' and 'YYYY-Qx')
+        years = times.astype(str).str[:4].astype(int)
+        mask = (years >= 2008) & (years <= 2022)
+        times_f = times[mask]
+        values_f = values[mask]
 
-        if freq == 'a':                      # annual like 2019
-            x_vals = pd.to_datetime(pd.Series(times).astype(str), format='%Y')
-        elif freq == 'q':                    # quarterly like '2019-Q4'
-            x_vals = pd.PeriodIndex(times, freq='Q').to_timestamp('Q')
-        elif freq == 'm':                    # monthly like '2019-12'
-            x_vals = pd.to_datetime(times, format='%Y-%m')
-        else:
-            x_vals = times  # fallback (could be numeric or already datetime-like)
+        # If nothing remains after filter, show an empty panel with a note
+        if times_f.empty:
+            ax.set_title(f"{key} (no data 2008–2022)", pad=8)
+            ax.set_xlabel('Time'); ax.set_ylabel(ylab)
+            plot_i += 1
+            continue
 
-        ax.plot(x_vals, values, linewidth=2.8, color='black')
+        # Build x-axis dates based on frequency
+        freq = get_eurostat_time_unit(str(times_f.iloc[0]))  # 'a' or 'q'
+        if freq == 'a':
+            x_vals = pd.to_datetime(times_f.astype(str), format='%Y')
+        else:  # 'q'
+            x_vals = pd.PeriodIndex(times_f.astype(str), freq='Q').to_timestamp('Q')
+
+        ax.plot(x_vals, values_f.values, linewidth=2.2, color='black')
         ax.set_title(key, pad=8)
-        ax.set_xlabel('Time')
-        ax.set_ylabel(ylab)
+        ax.set_xlabel('Time'); ax.set_ylabel(ylab)
 
-        # Nice, less-dense ticks
-        if isinstance(x_vals, (pd.Series, pd.DatetimeIndex)) or (
-            hasattr(x_vals, 'dtype') and 'datetime' in str(getattr(x_vals, 'dtype', ''))
-        ):
-            loc, fmt = _year_locator_for_span(x_vals)
-            ax.xaxis.set_major_locator(loc)
-            ax.xaxis.set_major_formatter(fmt)
-        else:
-            # Non-datetime axis: integers only, not too many
-            ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=8, prune='both'))
+        # Less-dense integer years
+        loc, fmt = _year_locator_for_span(x_vals)
+        ax.xaxis.set_major_locator(loc)
+        ax.xaxis.set_major_formatter(fmt)
 
         plot_i += 1
         if plot_i >= len(axes_flat):
             break
 
-    # --- hide unused axes ---
+    # Hide unused axes
     for n in range(num_plots, rows * cols):
         fig.delaxes(axes_flat[n])
 
     fig.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.show()
-
 
 # Plots the NPL values (actual and predicted) for training and two test splits
 def plot_npl_predictions(data_train, data_test_1, data_test_2, model):
