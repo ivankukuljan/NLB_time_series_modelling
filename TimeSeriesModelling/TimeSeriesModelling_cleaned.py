@@ -5,6 +5,7 @@ import re
 import os
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from matplotlib.ticker import MaxNLocator
 from matplotlib.lines import Line2D
 from datetime import datetime, date
 from sklearn.preprocessing import StandardScaler
@@ -731,76 +732,94 @@ def evaluate_linear_model(model, test_data):
 
 
 
-def plot_nlb_and_eurostat_data(data, eurostat_datasets, output_path=os.path.join(BASE_DIR, 'data', 'data_plots.png')):
+def _year_locator_for_span(dates, max_ticks=8):
+    """Choose a YearLocator interval so ticks are not too dense."""
+    if not len(dates):
+        return mdates.YearLocator(), mdates.DateFormatter('%Y')
+    dmin, dmax = pd.to_datetime(dates[0]), pd.to_datetime(dates[-1])
+    span_years = max(1, int(round((dmax - dmin).days / 365.25)))
+    interval = max(1, int(round(span_years / max(1, max_ticks))))
+    return mdates.YearLocator(interval), mdates.DateFormatter('%Y')
+
+def plot_nlb_and_eurostat_data(
+    data,
+    eurostat_datasets,
+    output_path=os.path.join(BASE_DIR, 'data', 'data_plots.png')
+):
     """
-    Plots NLB NPL data and each Eurostat dataset as subplots, arranges them in a grid,
-    and saves the figure to the specified output_path.
-    
-    Parameters:
-        data: pd.DataFrame containing at least the column 'npl' and a date/time index.
-        eurostat_datasets: dict of Eurostat dataset dicts, each with keys 'times' and 'values'.
-        output_path: file path where the PNG image is saved.
+    Plots NLB NPL data and each Eurostat dataset as subplots, arranged in a grid,
+    and saves the figure to output_path.
     """
+    # --- layout ---
     num_plots = 1 + len(eurostat_datasets)
-    cols = 5
+    cols = 3
     rows = (num_plots + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 5.6, rows * 3.8), squeeze=False)
+    axes_flat = axes.ravel()
 
-    fig, axes = plt.subplots(rows, cols, figsize=(cols * 6, rows * 4), squeeze=False)
-
-    # First subplot: NLB NPL
-    ax = axes[0, 0]
-    # Ensure the index is parsed as datetime, if not already
+    # --- first subplot: NLB NPL ---
+    ax = axes_flat[0]
     try:
         idx = pd.to_datetime(data.index.to_list())
     except Exception:
         idx = data.index.to_list()
-    ax.plot(idx, data['npl'])
-    ax.set_title('NLB NPL')
+
+    ax.plot(idx, data['npl'], linewidth=2.8, color='#230078')
+    ax.set_title('NLB NPL', pad=8)
     ax.set_xlabel('Date')
     ax.set_ylabel('NPL')
-    ax.xaxis.set_major_locator(mdates.YearLocator())
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
 
-    # The rest: Eurostat datasets
+    if hasattr(idx, '__len__') and len(idx) > 1:
+        loc, fmt = _year_locator_for_span(idx)
+        ax.xaxis.set_major_locator(loc)
+        ax.xaxis.set_major_formatter(fmt)
+
+    # --- Eurostat subplots ---
     plot_i = 1
-    for key in eurostat_datasets:
-        r = plot_i // cols
-        c = plot_i % cols
-        ax = axes[r, c]
-        dataset = eurostat_datasets[key]
+    for key, dataset in eurostat_datasets.items():
+        ax = axes_flat[plot_i]
         times = dataset['times']
         values = dataset['values']
+        ylab = dataset.get('dataset_code', 'Value')
 
-        freq = get_eurostat_time_unit(times[0])
+        freq = get_eurostat_time_unit(times[0])  # 'a', 'q', 'm', ...
 
-        if freq == 'a':   # annual
+        if freq == 'a':                      # annual like 2019
             x_vals = pd.to_datetime(pd.Series(times).astype(str), format='%Y')
-        elif freq == 'q': # quarterly like '2019-Q4'
+        elif freq == 'q':                    # quarterly like '2019-Q4'
             x_vals = pd.PeriodIndex(times, freq='Q').to_timestamp('Q')
-        elif freq == 'm': # monthly like '2019-12'
+        elif freq == 'm':                    # monthly like '2019-12'
             x_vals = pd.to_datetime(times, format='%Y-%m')
         else:
-            x_vals = times  # fallback
+            x_vals = times  # fallback (could be numeric or already datetime-like)
 
-        ax.plot(x_vals, values)
-        ax.set_title(key)
+        ax.plot(x_vals, values, linewidth=2.8, color='black')
+        ax.set_title(key, pad=8)
         ax.set_xlabel('Time')
-        ax.set_ylabel('Value')
-        if isinstance(x_vals, (pd.Series, pd.DatetimeIndex, list)) and hasattr(x_vals, 'dtype') and str(x_vals.dtype).startswith('datetime'):
-            ax.xaxis.set_major_locator(mdates.YearLocator())
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+        ax.set_ylabel(ylab)
+
+        # Nice, less-dense ticks
+        if isinstance(x_vals, (pd.Series, pd.DatetimeIndex)) or (
+            hasattr(x_vals, 'dtype') and 'datetime' in str(getattr(x_vals, 'dtype', ''))
+        ):
+            loc, fmt = _year_locator_for_span(x_vals)
+            ax.xaxis.set_major_locator(loc)
+            ax.xaxis.set_major_formatter(fmt)
+        else:
+            # Non-datetime axis: integers only, not too many
+            ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=8, prune='both'))
+
         plot_i += 1
+        if plot_i >= len(axes_flat):
+            break
 
-    # Hide any unused subplots
+    # --- hide unused axes ---
     for n in range(num_plots, rows * cols):
-        r = n // cols
-        c = n % cols
-        fig.delaxes(axes[r, c])
+        fig.delaxes(axes_flat[n])
 
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=300)
+    fig.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.show()
-
 
 
 # Plots the NPL values (actual and predicted) for training and two test splits
@@ -1033,13 +1052,7 @@ months_window = 6
 quarters_window = 2
 annual_window = 1
 
-print('Computing at:')
-print(f'nlb_window: {nlb_window}')
-# print(f'months_window: {months_window}')
-print(f'quarters_window: {quarters_window}')
-print(f'annual_window: {annual_window}')
-print('')
-print('Importing Eurostat files.')
+
 
 for key in eurostat_datasets:
     dataset_dict = eurostat_datasets[key]
@@ -1073,13 +1086,7 @@ model = fit_linear_model_with_time_delay(data_train)
 # print(model.intercept_)
 
 print('Evaluating the model')
-print('')
-print(f'nlb_window: {nlb_window}')
-# print(f'months_window: {months_window}')
-print(f'quarters_window: {quarters_window}')
-print(f'annual_window: {annual_window}')
-print('')
-print('Importing Eurostat files.')
+
 print('')
 print('Results')
 y_pred_test_1, mse_test_1, r2_test_1 = evaluate_linear_model(model, data_test_1)
