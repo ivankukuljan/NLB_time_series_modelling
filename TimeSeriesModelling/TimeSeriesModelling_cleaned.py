@@ -14,6 +14,12 @@ from collections import defaultdict
 from typing import Dict, Tuple, Iterable, Optional
 from sklearn.metrics import mean_squared_error, r2_score
 
+try:
+    # Works when running a script
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    # Fallback for notebooks or interactive mode
+    BASE_DIR = os.getcwd()
 
 eurostat_datasets = {'Unemployment Rate' :
  {'dataset_code' : 'une_rt_q',
@@ -434,8 +440,9 @@ def compose_modeling_data(
         months_window=9,
         quarters_window=3,
         annual_window=1,
-        nlb_npl_data_path='/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/npl_bank.xlsx',
-        data_output_folder='/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/plots'):
+        nlb_npl_data_path=os.path.join(BASE_DIR, 'npl_bank.xlsx'),
+        data_output_folder=os.path.join(BASE_DIR, 'plots'),
+        ):
     """
     Compose a modeling DataFrame combining NPL data with Eurostat datasets, with options for scaling,
     imputation, lagged features, and data output caching.
@@ -724,7 +731,7 @@ def evaluate_linear_model(model, test_data):
 
 
 
-def plot_nlb_and_eurostat_data(data, eurostat_datasets, output_path='/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/data/data_plots.png'):
+def plot_nlb_and_eurostat_data(data, eurostat_datasets, output_path=os.path.join(BASE_DIR, 'data', 'data_plots.png')):
     """
     Plots NLB NPL data and each Eurostat dataset as subplots, arranges them in a grid,
     and saves the figure to the specified output_path.
@@ -898,7 +905,7 @@ def plot_npl_predictions(data_train, data_test_1, data_test_2, model):
     plt.tight_layout()
     # Save to file, ensure tight bounding box for legend etc.
     plt.savefig(
-        '/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/plots/npl_predictions.png',
+        os.path.join(BASE_DIR, 'plots', 'npl_predictions.png'),
         dpi=300,
         bbox_inches="tight",   # includes outside artists
         pad_inches=0.1
@@ -1012,8 +1019,7 @@ def plot_abs_coeff_series_by_dataset(
         title="Variable name (time unit)"
     )
 
-    plt.savefig(
-        '/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/plots/model_coefficients.png',
+    plt.savefig(os.path.join(BASE_DIR, 'plots', 'model_coefficients.png'),
         dpi=300, bbox_inches="tight", pad_inches=0.1
     )
     plt.show()
@@ -1047,7 +1053,7 @@ print('Composing model data')
 # data = compose_modeling_data(eurostat_datasets, scale=True, impute=True, nlb_window = 2, months_window=6, quarters_window=2, annual_window=1)
 data = compose_modeling_data(eurostat_datasets, scale=True, impute=True, nlb_window = nlb_window, months_window=months_window, quarters_window=quarters_window, annual_window=annual_window)
 
-plot_nlb_and_eurostat_data(data, eurostat_datasets, output_path='/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/plots/data_plots.png')
+plot_nlb_and_eurostat_data(data, eurostat_datasets, output_path=os.path.join(BASE_DIR, 'plots', 'data_plots.png'))  
 
 # print(data.columns)
 
