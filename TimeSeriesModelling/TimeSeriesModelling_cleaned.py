@@ -5,6 +5,7 @@ import re
 import os
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from matplotlib.lines import Line2D
 from datetime import datetime, date
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
@@ -433,8 +434,8 @@ def compose_modeling_data(
         months_window=9,
         quarters_window=3,
         annual_window=1,
-        nlb_npl_data_path='/home/ivan/IskanjeDela/Banking/NLB/datav3/npl_bank.xlsx',
-        data_output_folder='/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/data'):
+        nlb_npl_data_path='/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/npl_bank.xlsx',
+        data_output_folder='/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/plots'):
     """
     Compose a modeling DataFrame combining NPL data with Eurostat datasets, with options for scaling,
     imputation, lagged features, and data output caching.
@@ -897,12 +898,13 @@ def plot_npl_predictions(data_train, data_test_1, data_test_2, model):
     plt.tight_layout()
     # Save to file, ensure tight bounding box for legend etc.
     plt.savefig(
-        '/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/data/npl_predictions.png',
+        '/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/plots/npl_predictions.png',
         dpi=300,
         bbox_inches="tight",   # includes outside artists
         pad_inches=0.1
     )
     plt.show()
+
 
 def plot_abs_coeff_series_by_dataset(
     model: LinearRegression,
@@ -912,119 +914,110 @@ def plot_abs_coeff_series_by_dataset(
 ) -> plt.Axes:
     """
     Group linear model coefficients into time-delay series per (dataset name, unit),
-    then plot the absolute values on a single log-y plot. Series are ordered by
-    descending max |coef| so the most influential appears first.
+    then plot the absolute values on a single log-y plot.
+    Lines show |coef|; marker direction shows sign at each delay.
     """
-    # Check that the model is already fit and has .coef_
     if not hasattr(model, "coef_"):
         raise ValueError("Model must be fit and have a 'coef_' attribute.")
 
-    # Convert coefficients and feature names to arrays/lists
     coefs = np.asarray(model.coef_, dtype=float)
     names = list(feature_names)
-
-    # Check that we have as many names as coefficients
     if coefs.shape[0] != len(names):
         raise ValueError(
             f"Length mismatch: {coefs.shape[0]} coefficients vs {len(names)} feature names."
         )
 
-    # This dictionary will group coefficients by (dataset_name, unit) and within that by delay
-    grouped: Dict[Tuple[str, str], Dict[int, float]] = defaultdict(dict)
-
-    # Iterate over features and coefficients, parsing the pattern of <dataset name>-<delay><unit>
+    # (dataset, unit) -> delay -> (abs_val, sign)
+    grouped: Dict[Tuple[str, str], Dict[int, Tuple[float, float]]] = defaultdict(dict)
     for name, coef in zip(names, coefs):
         try:
             dataset, delay, unit = extract_dataset_name_delay_and_unit(name)
         except ValueError:
-            # Skip feature names that don't match the pattern
             continue
-        # Store absolute value of coeff by (dataset, unit) and delay
-        grouped[(dataset, unit)][delay] = float(abs(coef))
+        grouped[(dataset, unit)][delay] = (float(abs(coef)), float(np.sign(coef)))
 
-    # Raise if nothing parsable
     if not grouped:
         raise ValueError("No parsable feature names found to plot.")
 
-    # For each series (dataset, unit), collect sorted delays and respective abs coefficients
     series = []
     for key, mapping in grouped.items():
-        delays = sorted(mapping.keys())  # sorted list of lag values
-        ys = [mapping[d] for d in delays]  # absolute coefficient magnitudes
-        max_abs = max(ys) if ys else 0.0   # for ordering by importance
-        series.append({"key": key, "x": delays, "y": ys, "max_abs": max_abs})
-
-    # Order the series by their max (descending) so most important are plotted first
+        delays = sorted(mapping.keys())
+        ys = [mapping[d][0] for d in delays]
+        signs = [mapping[d][1] for d in delays]
+        max_abs = max(ys) if ys else 0.0
+        series.append({"key": key, "x": delays, "y": ys, "signs": signs, "max_abs": max_abs})
     series.sort(key=lambda s: s["max_abs"], reverse=True)
 
-    # Create new axes if none are provided
     if ax is None:
         fig, ax = plt.subplots(figsize=(11, 6))
 
-    # Prepare cycles of styles: line, color, marker.
-    # Use matplotlib's prop cycle for visually distinct colors
-    linestyles = ["-", "-.", ":"]  # 3 line styles
-    prop_cycler = plt.rcParams["axes.prop_cycle"]
-    colors = [d.get("color") for d in prop_cycler]
-    markers = ["o", "s", "^"]  # 3 marker styles
+    linestyles = ["-", "--", ":"]
+    colors = [d.get("color") for d in plt.rcParams["axes.prop_cycle"]]
+    styles = [(c, linestyles[i]) for c in colors for i in range(len(linestyles))]
 
-    # Combine colors, linestyles, and markers for possible style permutations
-    styles = [(c, linestyles[i], markers[i]) for c in colors for i in range(len(linestyles))]
-
-    # Plot each series using a unique combination of style/color/marker
+    # Plot: line for |coef| with a single legend label; scatters for sign markers (no legend)
     for i, s in enumerate(series):
-        color, ls, marker = styles[i % len(styles)]
+        color, ls = styles[i % len(styles)]
         dataset, unit = s["key"]
         label = f"{dataset} ({unit})"
+
+        # 1) line for abs values (legend label here, once)
         ax.plot(
-            s["x"],
-            s["y"],
-            label=label,
-            linestyle=ls,
-            color=color,
-            marker=marker,
-            linewidth=2,
-            markersize=6,
-            alpha=0.9,
+            s["x"], s["y"],
+            linestyle=ls, color=color, linewidth=2, alpha=0.9, label=label,
         )
 
-    # Log scale for Y axis (absolute magnitude of coefficients)
-    ax.set_yscale("log")
-    # X label indicates the lag/delay units
-    ax.set_xlabel("Delay [in time units]")
-    # Y label is log(absolute coefficient)
-    ax.set_ylabel("|Coefficient| (log scale)")
+        # 2) sign markers (no legend entries)
+        pos_x = [x for x, sign in zip(s["x"], s["signs"]) if sign > 0]
+        pos_y = [y for y, sign in zip(s["y"], s["signs"]) if sign > 0]
+        neg_x = [x for x, sign in zip(s["x"], s["signs"]) if sign < 0]
+        neg_y = [y for y, sign in zip(s["y"], s["signs"]) if sign < 0]
 
-    # Set plot title if specified
+        if pos_x:
+            ax.scatter(
+                pos_x, pos_y,
+                marker="^", color=color, edgecolor="black", linewidth=0.5,
+                s=55, alpha=0.95, label="_nolegend_",
+            )
+        if neg_x:
+            ax.scatter(
+                neg_x, neg_y,
+                marker="v", color=color, edgecolor="black", linewidth=0.5,
+                s=55, alpha=0.95, label="_nolegend_",
+            )
+
+    # Axes styling
+    ax.set_yscale("log")
+    ax.set_xlabel("Delay [in time units]")
+    ax.set_ylabel("|Coefficient| (log scale)")
     if title:
         ax.set_title(title)
 
-    # Enable grid for easier reading
     ax.grid(True, which="both", linewidth=0.5, alpha=0.5)
 
-    # Add a legend outside right of plot for visibility
+    # Build legend: series lines first, then black triangle sign key at the bottom
+    handles, labels = ax.get_legend_handles_labels()
+    sign_handles = [
+        Line2D([], [], marker="^", linestyle="None", color="black", markersize=7, label="positive"),
+        Line2D([], [], marker="v", linestyle="None", color="black", markersize=7, label="negative"),
+    ]
     ax.legend(
-        loc="center left",           # location just outside plot
-        bbox_to_anchor=(1.02, 0.5),  # x=1.02 breaks out of axes
-        fontsize=8,
-        ncol=1,
-        frameon=False
+        handles + sign_handles, 
+        labels + ["positive coefficient (▲)", "negative coefficient (▼)"],
+        loc="center left", 
+        bbox_to_anchor=(1.02, 0.5), 
+        fontsize=8, 
+        ncol=1, 
+        frameon=False,
+        title="Variable name (time unit)"
     )
 
-    # Save figure to disk with tight bounding box to include legend
     plt.savefig(
-        '/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/data/model_coefficients.png',
-        dpi=300,
-        bbox_inches="tight",
-        pad_inches=0.1
+        '/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/plots/model_coefficients.png',
+        dpi=300, bbox_inches="tight", pad_inches=0.1
     )
-    # Show the plot
     plt.show()
-    # Return the axes for further use/modification if needed
     return ax
-
-
-
 
                 
 
@@ -1054,7 +1047,7 @@ print('Composing model data')
 # data = compose_modeling_data(eurostat_datasets, scale=True, impute=True, nlb_window = 2, months_window=6, quarters_window=2, annual_window=1)
 data = compose_modeling_data(eurostat_datasets, scale=True, impute=True, nlb_window = nlb_window, months_window=months_window, quarters_window=quarters_window, annual_window=annual_window)
 
-plot_nlb_and_eurostat_data(data, eurostat_datasets, output_path='/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/data/data_plots.png')
+plot_nlb_and_eurostat_data(data, eurostat_datasets, output_path='/home/ivan/IskanjeDela/Banking/NLB/NLB_assignement_Kukuljan/TimeSeriesModelling/plots/data_plots.png')
 
 # print(data.columns)
 
