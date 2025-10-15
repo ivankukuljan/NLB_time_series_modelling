@@ -1,0 +1,37 @@
+/* styles.css */
+
+/* Apply NLB purple to all section headings */
+h1, h2, h3, h4, h5, h6 {
+  color: #230078 !important;
+}
+
+/* Optional: also color the document title */
+.quarto-title-block .title,
+.quarto-title h1.title {
+  color: #230078 !important;
+}
+
+/* Optional: color links and accent lines consistently */
+a {
+  color: #230078;
+}
+a:hover {
+  color: #4a33b5; /* slightly lighter hover tone */
+}
+
+/* Optional: table of contents active link color */
+.sidebar nav li > a.active {
+  color: #230078;
+  font-weight: 600;
+}
+
+/* Scale all figures and images linearly */
+.page-columns .content figure img,
+.page-columns .content .cell-output-display img {
+  width: 95%;          /* 80% of their normal size */
+  max-width: 95%;      /* prevents stretching */
+  height: auto;        /* preserve aspect ratio */
+  display: block;
+  margin-left: auto;   /* center the images */
+  margin-right: auto;
+}

@@ -1,3 +1,18 @@
+---
+format:
+  html:
+    code-fold: true
+    code-summary: Show code
+    toc: true
+    css: styles.css
+  pdf: default
+jupyter: python3
+execute:
+  enabled: true
+---
+
+
+```{python}
 import pandas as pd
 import numpy as np
 import os
@@ -12,7 +27,54 @@ from plotting_functions import plot_nlb_and_eurostat_data, plot_df_head_table, p
 
 
 BASE_DIR = get_basedir()
+```
 
+
+# **Time Series Modelling**
+
+**Author:** Ivan Kukuljan 
+**Date:** October 14, 2025 
+
+**Recruiting assignment at the NLB Group**
+
+---
+
+## Key findings {.unnumbered}
+
+- Among macroeconomic variables, the Non-Performing Loans (NPL) are most strongly influenced by the Gross domestic product, Unemployment Rate and House price index
+- The model correctly captures different NPL regimes - the Euro crisis and the post crisis period
+- The model has a future predictive power of two quarters
+
+## Abstract {.unnumbered}
+
+Non-Performing Loans (NPL) is one the most important indicators in bank. It reflects loans where the borrowers have stopped making payments for an extended period. Here we model the dependence of the NPL of Nova Ljubljanska Banka on most important macroeconomic variables in the period of 2008-2022. We develop a linear model with delay. We test the model on two non-overlapping test sets: test set 1 - missing data inside of the modelling period, test set 2 - future period. The model achieves the $R^2$ score of 0.8645 inside of the modelling period, while it is only able to predict two quarters ahead in the future period. Gross domestic product, Unemployment Rate and House price index are identified as main macroeconomic drivers of the NPL.
+
+## Data sets
+
+The NPL data of Nova Ljubljanska Banka have been provided by NLB. They are quarterly data giving the date and the NLP values for the period 2008-2022. 
+
+We choose the following set of macroeconomic variables from the Eurostat database:
+
+- Gross domestic product (GDP) (2015 = 100) - nama_10_gdp, annual - representing health of the national economy
+- Gross domestic product (GDP) (percentage change on previous) - nama_10_gdp, annual - representing the trend in the national economy
+- Unemployment Rate - une_rt_q, quarterly
+- House price index (2015 = 100) - prc_hpi_q, quarterly
+- Harmonised Index of Consumer Prices (annual rate of change) - prc_hicp_manr, monthly
+- Private sectror credit flow - tipspc10, annual
+- Money Market Interest Rate - irt_st_m, monthly
+- Consumer confidence indicator - ei_bsco_m, monthly
+
+We have considered several other macroeconomic variables, like Government deficit/surplus, Consumer confidence - financial last 12 months, Consumer confidence - financial next 12 months. However, they have turned out to have less influence on the NPL.
+
+NLB is operating on a wide market, consisting of Slovenia, Serbia, Croatia, Bosnia and Herzegovina, Macedonia, Montenegro and Kosovo. Unfortunately, since not all of these countries are member states of the EU, Eurostat is not keeping consistent statistics of all of them. While some data sets are available fo some of them, many data sets are missing, or have only been kept in the recent years. For simplicity, we therefore choose to model the NPL using macroeconomic variables for Slovenia, where 62% of NLB's banking assets are located [NLB Group Presentation, 1H 2025 Financial Results]. 
+
+The time series of the NLB NPL rates as well as the chosen macroeconomic variables are shown in the Figure 1 below.
+
+The chosen data sets have different frequencies. For consistency and in order to reduce the number of parameters of the model, we choose to transform monthly datasets into quarterly. Annual data sets are treated as annual as described below. For the stability of the model, we scale the data sets to have zero mean and unit variance. 
+
+We split the data into non-overlapping train set and two test sets. The train set and the test set 1 are randomly split data entries for the period 2008 until 2021-Q2. The test set 2 consists of all the data entries for the period 2021-Q3 until 2022-Q4. The purpose of the test set 1 is to test the validity of the model inside of the period where it has been optimized. The purpose of the test set 2 is to test the performance of the model for the future predictions. 
+
+```{python}
 
 eurostat_datasets = {'Gross domestic product (GDP) (2015 = 100)' :
 {'dataset_code' : 'nama_10_gdp',
@@ -73,8 +135,6 @@ eurostat_datasets = {'Gross domestic product (GDP) (2015 = 100)' :
  'resample_method' : 'mean',
  'fill_missing' : True}
                     }
-
-
 
 
 def retrieve_eurostat_dataset(dataset_dict):
@@ -151,10 +211,37 @@ def retrieve_eurostat_dataset(dataset_dict):
 
     return dataset_dict
 
+for key in eurostat_datasets:
+    dataset_dict = eurostat_datasets[key]
+    dataset_dict = retrieve_eurostat_dataset(dataset_dict)
+    eurostat_datasets[key] = dataset_dict
 
+plot_nlb_and_eurostat_data(eurostat_datasets, output_path=os.path.join(BASE_DIR, 'plots', 'data_plots.png'))  
+```
 
+**Figure 1.** Time series of the Non-Performing Loans (NPL) of Nova Ljubljanska Banka (NLB) for the period 2008-2022 and the macroeconomic variables from the Eurostat database chosen for the modelling of the NPL.
 
+## Model
 
+We choose to model the NPL using the macroeconomic variables with a linear model with delayed action. There are two important reasons for choosing a linear model:
+
+- A linear model offers a large amount of **explainability** and **interpretability**. In particular it allows us to easily extract the importance of different macroeconomic variables.
+- A linear model is the most **robust** choice given that the NPL dataset is rather small consisting of only 60 data points. A more complex nonlinear model would come with a much larger set of parameters making it impossible to extract them without huge errors or even making the set of equations undetermined.
+
+We build the following model:
+$$
+\begin{align}
+\text{NPL}(t) &= \text{offset} + \sum_{d=1}^{D_{\text{NPL}}} K_{t-d}^{\text{NPL}}\cdot \text{NPL}(t-d) \\
+&\quad + \sum_{\text{quarterly variables}}\sum_{d=0}^{D_{\text{quarterly}}} K_{t-d}^{\text{var.}}\cdot \text{variable}(t-d) \\
+&\quad + \sum_{\text{annual variables}}\sum_{d=0}^{D_{\text{annual}}} K_{t-d}^{\text{var.}}\cdot \text{variable}(t-d)
+\end{align}
+$$
+
+where $D_{\text{NPL}}$,  $D_{\text{quarterly}}$, $D_{\text{annual}}$ are the maximal delays for the corresponding variable. They represent the window in which the past values of the variables can influence the current value of NPL. Our analysis at different values of the delay parameters has shown that the model performs best at $D_{\text{NPL}}=2\text{ quarters}$,  $D_{\text{quarterly}}=2\text{ quarters}$, $D_{\text{annual}}=1\text{ year}$. This means that the value of NPL is dependent on the value of itself and quarterly variables from the period of up to 2 quarters (6 months) in the past and on the annual variables for up to a year in the past. The coefficients $K_{\tau}^{\alpha}$ and offset are parameters of the model that are determined through the optimization - linear regression.
+
+Our data manipulation proceeds by collecting NPL time points and all the variables values that are within the windows allowed by the delays. This is completed by the code below and the first few rows of such an object are presented in the Table 1.
+
+```{python}
 def compose_modelling_data(
         eurostat_datasets,
         scale=True,
@@ -346,11 +433,25 @@ def compose_modelling_data(
         # data.to_csv(data_output_path, index_label='date')
         return data
 
+nlb_window = 2
+months_window = 6
+quarters_window = 2
+annual_window = 1
 
+data = compose_modelling_data(eurostat_datasets, scale=True, impute=True, nlb_window = nlb_window, months_window=months_window, quarters_window=quarters_window, annual_window=annual_window)
+head_df, styled = plot_df_head_table(data, n=8, caption="Training data (head)", precision=3)
+styled 
+```
 
+**Table 1.** First few rows of the collected data points for modelling - npl values and values of the variables within the time windows allowed my maximal delays. Recall that the values of the macroeconomic variables have been scaled to have zero mean and unit standard deviation for the stability of the model. 
 
+## Results 
 
+The model achieves the mean square error (MSE) of 0.0001 and the $R^2$ score of 0.86 in the test set 1 reflecting solid reliability withing the modelling period. In the test set 2, measuring the future performance of the model, it achieves a much worse $R^2$ score of -66.58. 
 
+Figure 2 compares the model predictions with the ground truth values and the train data. Recall that the test data has been taken to be non-overlapping with the train data - the corresponding time stamps are not included in the train data. We see that the model captures correctly the different regimes in the NPL curve - higher values during the Euro crisis 2008-2012 and lower values afterwards. In the future prediction regime, the model captures really well the first next quarter value and stays relatively close to the second next value before it drops to zero for the third value. This indicates that the predictive power of the model is at most 2 quarters. 
+
+```{python}
 def train_test_split(data, test_1_size=6, test_2_size=6, random_state=None):
     """
     Splits the data into three sets: training, test_1, and test_2.
@@ -457,73 +558,38 @@ def evaluate_linear_model(model, test_data):
     return y_pred, mse, r2                     # Return predictions and metrics
 
 
-
-
-
-for key in eurostat_datasets:
-    dataset_dict = eurostat_datasets[key]
-    dataset_dict = retrieve_eurostat_dataset(dataset_dict)
-    eurostat_datasets[key] = dataset_dict
- 
-plot_nlb_and_eurostat_data(eurostat_datasets, output_path=os.path.join(BASE_DIR, 'plots', 'data_plots.png'))  
-
-
-# print(eurostat_datasets.keys())
-
-print('Composing model data')
-nlb_window = 2
-months_window = 6
-quarters_window = 2
-annual_window = 1
-
-# data = compose_modelling_data(eurostat_datasets, scale=True, impute=True, nlb_window = 2, months_window=6, quarters_window=2, annual_window=1)
-data = compose_modelling_data(eurostat_datasets, scale=True, impute=True, nlb_window = nlb_window, months_window=months_window, quarters_window=quarters_window, annual_window=annual_window)
-head_df, styled = plot_df_head_table(data, n=8, caption="Training data (head)", precision=3)
-styled  # Display in Jupyter/Quarto
-
-
-
-
-# print(data.columns)
-
-print('Computing the train - test split')
 data_train, data_test_1, data_test_2 = train_test_split(data, test_1_size=6, test_2_size=6, random_state=42)
-
-
-print('Fitting the model')
 model = fit_linear_model_with_time_delay(data_train)
 
-print('')
-print('Model coefficients:')
-print(model.coef_)
-print('')
-print('Model intercept:')
-print(model.intercept_)
-
-df_coef, styled = plot_model_coefficients_table(model, data, target="npl")
-styled  # In Jupyter/Quarto, just evaluating this displays the nice HTML table
-
-
-print('')
-print('Evaluating the model')
-
-print('')
-print('Results:')
 y_pred_test_1, mse_test_1, r2_test_1 = evaluate_linear_model(model, data_test_1)
-print(f'MSE test_1: {mse_test_1:.4f}')
-print(f'R² test_1: {r2_test_1:.4f}')
-print('')
 y_pred_test_2, mse_test_2, r2_test_2 = evaluate_linear_model(model, data_test_2)
-print(f'MSE test_2: {mse_test_2:.4f}')
-print(f'R² test_2: {r2_test_2:.4f}')
 
 plot_npl_predictions(data_train, data_test_1, data_test_2, y_pred_test_1, mse_test_1, r2_test_1, y_pred_test_2, mse_test_2, r2_test_2)
+```
 
+**Figure 2.** Comparison of the predictions of the linear model with delay with the ground truth values and the training data. Above: The model captures well the crisis and the post crisis regimes of the NPL, achieving solid performance metrics scores. Below: The model is only able to predict two quartals into the furure. 
 
+The model's coefficients reveal the importance of different variables at different time spans for the model prediction. Table 2 lists all the model coefficients. Figure 3 shows the coefficients in a log-linear plot allowing us to observe the importance of variables. Gross domestic product, Unemployment Rate and House price index are found to be the most important macroeconomic variables influencing the NPL. We also find that the value of the NPL in the previous quartal is extremely important - if the bank is doing well, that will typically not change overnight and vice versa, a nonstable situation can usually not be improved very rapidly. The exception are of course extreme macroeconomic events like crises and recoveries. 
 
+```{python}
+df_coef, styled = plot_model_coefficients_table(model, data, target="npl")
+styled  
+```
+
+**Table 2.** Model coefficients for all the variables and time delays. 
+
+```{python}
 plot_abs_coeff_series_by_dataset(model, feature_names=data.drop(columns=['npl']).columns)
+```
 
+**Figure 3.** Comparison of the magnitudes of influence coefficients for different variables at different delays (see the Model section). The plot shows absolute values in a log-linear scale. Marker style denotes the sign of the coefficient as explained by the legend. We see that the previous values of the NPL and GDP are an order of magnitude more important than other macroeconomic variables. 
 
+## Conclusions {.unnumbered}
 
+In this study, we developed a linear delayed-action model to describe and predict the Non-Performing Loans (NPL) of Nova Ljubljanska Banka based on key macroeconomic variables. The model demonstrates strong explanatory power within the modelling period, achieving an $R^2$ score of 0.86, and successfully reproduces the main NPL regimes associated with the Euro crisis and the subsequent recovery period.
+
+Our analysis identifies Gross Domestic Product, Unemployment Rate, and House Price Index as the primary macroeconomic drivers of NPL dynamics, reflecting the close link between credit risk and the broader economic environment. The inclusion of delayed terms proves essential for capturing the temporal dependencies in the data.
+
+However, the model’s predictive capability is limited to approximately two quarters ahead, beyond which accuracy rapidly deteriorates. This limitation likely stems from the model’s linear nature and the relatively small dataset. Future work could explore nonlinear or hybrid approaches, incorporate additional regional data, or include stress-testing scenarios to improve robustness and forecasting horizons.
 
 
